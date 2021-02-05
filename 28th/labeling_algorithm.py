@@ -7,7 +7,6 @@ import random
 def binarize(src_img, thresh, mode):
     gray_img = cv2.cvtColor(src_img, cv2.COLOR_RGB2GRAY)
     bin_img = cv2.threshold(gray_img, thresh, 255, mode)[1]
-    cv2.imwrite("bin_img.png", bin_img)
 
     return bin_img
 
@@ -221,7 +220,8 @@ class Labeling():
 if __name__ == "__main__":
     
     src_img = cv2.imread(sys.argv[1])
-    bin_img = binarize(src_img, 160, cv2.THRESH_BINARY_INV)
+    bin_img = binarize(src_img, 150, cv2.THRESH_BINARY_INV)
+    cv2.imwrite("bin_img.png", bin_img)
     
     label = Labeling()
     label_table = label.do_labeling(bin_img)
