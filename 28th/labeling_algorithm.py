@@ -11,6 +11,15 @@ def binarize(src_img, thresh, mode):
 
     return bin_img
 
+# ラベルテーブルの情報を元に入力画像に色をつける
+def get_label_img(src_img, label_table):
+    dst_img = src_img.copy()
+    for label in range(label_table.max()+1):
+        label_group_index = np.where(label_table == label)
+        dst_img[label_group_index] = random.sample(range(255), k=3)
+    return dst_img
+
+
 class Labeling():
 
     def do_labeling(self, bin_img):
@@ -22,7 +31,6 @@ class Labeling():
 
         # ラベルテーブル作成
         self.label_table = np.zeros_like(self.bin_img)
-        print("labeltable=" + str(self.label_table.shape))
 
         # ルックアップテーブル作成
         self.lookup_table = [0]
@@ -38,17 +46,24 @@ class Labeling():
                     continue
 
                 # ラベルテーブルを取得
-                label_around_pixel = self._get_label_table(y, x)
+                label_around_pixel = self._get_neighbor_label(y, x)
 
                 # 注目画素周辺のラベルを参照・ルックアップテーブル更新
                 labels = self._update_table(label_around_pixel, neighbor_shape)
 
                 # ラベルテーブル更新
-                self._set_label_table(y, x, labels)
+                self._set_neighbor_label(y, x, labels)
 
+        # ラベルの衝突を解決(ルックアップテーブル内)
         self._resolve_collision()
+
+        # 虫食いラベルを修正(ルックアップテーブル内)
+        self._compress_table()
+
+        # 修正したルックアップテーブルを参照して、ラベルテーブルを更新
         self._update_label_table()
 
+        # 逆走査時の近傍指定
         neighbor_shape = np.array([0,0,0,0,0,1,1,1,1])
 
         # 逆走査
@@ -58,22 +73,27 @@ class Labeling():
                     continue
                     
                 # ラベルテーブルを取得
-                label_around_pixel = self._get_label_table(y, x)
+                label_around_pixel = self._get_neighbor_label(y, x)
 
                 # 注目画素周辺のラベルを参照・ルックアップテーブル更新
                 labels = self._update_table(label_around_pixel, neighbor_shape)
 
                 # ラベルテーブル更新
-                self._set_label_table(y, x, labels)
+                self._set_neighbor_label(y, x, labels)
 
+        # ラベルの衝突を解決(ルックアップテーブル内)
         self._resolve_collision()
-        self._update_label_table()
 
-        # ラベルテーブルの虫食いラベルを修正
+        # 虫食いラベルを修正(ルックアップテーブル内)
         self._compress_table()
+
+        # 修正したルックアップテーブルを参照して、ラベルテーブルを更新
+        self._update_label_table()
 
         # 画像に追加した枠の削除
         self._border_cutoff()
+
+        return self.label_table
     
 
     # 画像の外周に1ピクセルの外枠をつける(走査時のピクセル外アクセスをなくすため)
@@ -93,7 +113,6 @@ class Labeling():
 
         # 左右の外枠を削除
         self.label_table = np.delete(self.label_table, [0, len(self.label_table[0])-1], axis=1)
-        print("labeltable=" + str(self.label_table.shape))
 
     
     # 注目画素周辺のラベルを参照・ルックアップテーブル更新
@@ -121,8 +140,8 @@ class Labeling():
             
         return around_label
 
+    # ラベルの衝突を解決
     def _resolve_collision(self):
-        print(self.lookup_table)
         for nLabel in reversed(range(len(self.lookup_table))):
             tmp = []
             array_num = nLabel
@@ -136,15 +155,13 @@ class Labeling():
             for t in tmp:
                self.lookup_table[t] = element
 
-        print(self.lookup_table)
-
     # ルックアップテーブルを参照して、ラベルテーブルを更新
     def _update_label_table(self):
         for array, nLabel in enumerate(self.lookup_table):
             self.label_table = np.where(self.label_table == array, nLabel, self.label_table)
 
     # ラベルテーブルを取得
-    def _get_label_table(self, y, x):
+    def _get_neighbor_label(self, y, x):
         return np.array([self.label_table[y-1][x-1],
                          self.label_table[y-1][x],
                          self.label_table[y-1][x+1],
@@ -156,7 +173,7 @@ class Labeling():
                          self.label_table[y+1][x+1]])
 
     # ラベルテーブルに書込み
-    def _set_label_table(self, y, x, labels):
+    def _set_neighbor_label(self, y, x, labels):
         self.label_table[y-1][x-1] = labels[0] if labels[0] != -1 else self.label_table[y-1][x-1]
         self.label_table[y-1][x]   = labels[1] if labels[1] != -1 else self.label_table[y-1][x]  
         self.label_table[y-1][x+1] = labels[2] if labels[2] != -1 else self.label_table[y-1][x+1]
@@ -169,34 +186,34 @@ class Labeling():
 
     # 虫食いラベルを埋める
     def _compress_table(self):
-        blank_label = []
+        new_label = []
         for array in range(len(self.lookup_table)):
-            if array not in self.lookup_table:
-                blank_label.append(array)
-            elif len(blank_label) != 0:
-                self.lookup_table = np.where(self.lookup_table == array, blank_label.pop(0), self.lookup_table)
-                blank_label.append(array)
+            if array == self.lookup_table[array]:
+                new_label.append(array)
 
-        print(self.lookup_table)
+        for l in new_label:
+            self.lookup_table = np.where(self.lookup_table == l, new_label.index(l), self.lookup_table)
 
-    def write(self):
+    # Debug
+    def debug_write(self):
+
+        # ラベルテーブルをcsv出力
         np.savetxt('label_table.csv', self.label_table, fmt='%s', delimiter=',')
         
+        # ラベリングしたすべての物体を1つずつ出力
+        self._write_all_object()
+        
+        # ルックアップテーブルを出力
+        self._show_lookup_table()
+
+
+    def _write_all_object(self):
         for nlabel in range(self.label_table.max()+1):
             label_obj = np.zeros_like(self.label_table)
             label_obj[np.where(self.label_table == nlabel)] = 255
             cv2.imwrite("label_obj" + str(nlabel) + ".png", label_obj)
-        
-        print(self.label_table.max())
 
-    def get_label_img(self, img):
-        ex = img.copy()
-        for label in range(self.label_table.max()+1):
-            label_group_index = np.where(self.label_table == label)
-            ex[label_group_index] = random.sample(range(255), k=3)
-        cv2.imwrite("label_img.png",ex)
-
-    def show_lookup_table(self):
+    def _show_lookup_table(self):
         for nlabel in range(self.label_table.max() + 1):
             print(str(nlabel) + ' : ' + str(self.lookup_table[nlabel]))
 
@@ -204,11 +221,10 @@ class Labeling():
 if __name__ == "__main__":
     
     src_img = cv2.imread(sys.argv[1])
-    bin_img = binarize(src_img, 150, cv2.THRESH_BINARY_INV)
+    bin_img = binarize(src_img, 160, cv2.THRESH_BINARY_INV)
     
     label = Labeling()
-    label.do_labeling(bin_img)
-    label.show_lookup_table()
+    label_table = label.do_labeling(bin_img)
 
-    label.get_label_img(src_img)
-    label.write()
+    label.debug_write()
+    cv2.imwrite("label_img.png", get_label_img(src_img, label_table))
