@@ -11,12 +11,12 @@ def binarize(src_img, thresh, mode):
     return bin_img
 
 # ラベルテーブルの情報を元に入力画像に色をつける
-def get_label_img(src_img, label_table):
-    dst_img = src_img.copy()
+def put_color_to_objects(src_img, label_table):
+    label_img = np.zeros_like(src_img)
     for label in range(label_table.max()+1):
         label_group_index = np.where(label_table == label)
-        dst_img[label_group_index] = random.sample(range(255), k=3)
-    return dst_img
+        label_img[label_group_index] = random.sample(range(255), k=3)
+    return label_img
 
 
 class Labeling():
@@ -227,4 +227,4 @@ if __name__ == "__main__":
     label_table = label.do_labeling(bin_img)
 
     label.debug_write()
-    cv2.imwrite("label_img.png", get_label_img(src_img, label_table))
+    cv2.imwrite("label_img.png", put_color_to_objects(src_img, label_table))
